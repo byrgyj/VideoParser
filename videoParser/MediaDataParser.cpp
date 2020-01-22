@@ -4,6 +4,43 @@
 
 uint32_t gCrcTable[] = { 0xFF };
 
+Descriptor::Descriptor() : mIsDolbyVision(false) {
+    mDoVi = 0x44 << 24 | 0x4F << 16 | 0x56 << 8 | 0x49;
+}
+
+Descriptor::~Descriptor() {
+
+}
+
+int32_t Descriptor::parse(const uint8_t *data, int32_t dataLength) {
+    if (data != NULL && dataLength <= 0) {
+        return -1;
+    }
+
+    int32_t index = 0;
+
+    while(index < dataLength) {
+        uint8_t tag = data[index];
+        index += 1;
+        uint8_t descriptorLength = data[index];
+
+        index += 1;
+        if (tag == 5) { // registor descriptor
+            uint32_t id = data[index] << 24 | data[index+1] << 16 | data[index+2] << 8 | data[index+3];
+            mIsDolbyVision = id == mDoVi;
+            break;
+        } else {
+	        index += descriptorLength;
+        }
+		
+    }
+    return 0;
+}
+
+
+
+
+//////////////////////
 MediaDataParser::MediaDataParser() : mIsHevc(false), mCurrentDataSize(0), mVideoCodecType(-1) {
 }
 
@@ -319,10 +356,13 @@ int MediaDataParser::parserPmt(TsPmtTable *pmtTable, const uint8_t *buffer) {
         pmtTable->reserved_6     = buffer[pos+3] >> 4;
         pmt_stream.esInfoLenght  = (buffer[pos+3] & 0x0F) << 8 | buffer[pos+4];
         pmt_stream.vDataLength     = pmt_stream.esInfoLenght + pos + 5;
-        pmt_stream.descriptor     = 0x00;  
+        //pmt_stream.descriptor     = 0x00;  
         if (pmt_stream.esInfoLenght != 0) {  
-            pmt_stream.descriptor = buffer[pos + 5];  
+            //pmt_stream.descriptor = buffer[pos + 5];
+			pmt_stream.AddDescriptor(buffer + pos + 5, pmt_stream.esInfoLenght);
             pos += pmt_stream.esInfoLenght;
+
+			printf("isDolbyVision:%d", pmt_stream.isDolbyVision());
         }
 
         if (pmt_stream.streamType == 0x24) {
@@ -471,6 +511,8 @@ int MediaDataParser::resetSdt(TsSdtTable *stdTable, uint8_t *buffer) {
 
     // 
     //crc = crc32Calculate(buffer, dataLength + 3 + 4);
+
+	return 0;
 }
 
 int MediaDataParser::parseVideo(const uint8_t * buffer, int32_t bufferLength) {

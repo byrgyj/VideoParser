@@ -4,6 +4,18 @@
 #include <vector>
 #define TS_PACKET_SIZE 188
 
+class Descriptor {
+public:
+    Descriptor();
+    ~Descriptor();
+
+    int32_t parse(const uint8_t *data, int32_t dataLength);
+    bool isDolbyVision() { return mIsDolbyVision; }
+private:
+    bool mIsDolbyVision;
+    uint32_t mDoVi;
+};
+
 struct SPS_INFO {
     SPS_INFO() : width(0), height(0),   profileIdc(0), level(0), extraDataLength(0), finished(false), format(-1) {
         memset(extraData, 0, sizeof(extraData));
@@ -51,7 +63,18 @@ typedef struct TsPmtStream
     unsigned elementaryPid                    : 13; //该域指示TS包的PID值。这些TS包含有相关的节目元素    
     unsigned esInfoLenght                    : 12; //前两位bit为00。该域指示跟随其后的描述相关节目元素的byte数
     uint16_t vDataLength;
-    unsigned descriptor;    
+    //unsigned descriptor;
+
+	void AddDescriptor(const uint8_t *data, int32_t dataLength) {
+		Descriptor des;
+		des.parse(data, dataLength);
+
+		descriptor = des;
+	}
+
+	bool isDolbyVision() { return descriptor.isDolbyVision(); }
+
+	Descriptor descriptor;
 }TsPmtStream; 
 
 //PMT 表结构体  
@@ -125,8 +148,6 @@ typedef struct TsSdtTable {
 enum MediaType { Media_Unknow = -1, Media_Video, Media_Audio, Media_Subtitle };
 
 enum VideoCodecType { V_UnknewCodec = -1, V_AVC, V_HEVC };
-
-
 
 class MediaDataParser
 {
