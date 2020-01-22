@@ -4,42 +4,6 @@
 
 uint32_t gCrcTable[] = { 0xFF };
 
-Descriptor::Descriptor() : mIsDolbyVision(false) {
-    mDoVi = 0x44 << 24 | 0x4F << 16 | 0x56 << 8 | 0x49;
-}
-
-Descriptor::~Descriptor() {
-
-}
-
-int32_t Descriptor::parse(const uint8_t *data, int32_t dataLength) {
-    if (data != NULL && dataLength <= 0) {
-        return -1;
-    }
-
-    int32_t index = 0;
-
-    while(index < dataLength) {
-        uint8_t tag = data[index];
-        index += 1;
-        uint8_t descriptorLength = data[index];
-
-        index += 1;
-        if (tag == 5) { // registor descriptor
-            uint32_t id = data[index] << 24 | data[index+1] << 16 | data[index+2] << 8 | data[index+3];
-            mIsDolbyVision = id == mDoVi;
-            break;
-        } else {
-	        index += descriptorLength;
-        }
-		
-    }
-    return 0;
-}
-
-
-
-
 //////////////////////
 MediaDataParser::MediaDataParser() : mIsHevc(false), mCurrentDataSize(0), mVideoCodecType(-1) {
 }
@@ -54,29 +18,6 @@ int32_t MediaDataParser::filterData(uint8_t *data, int32_t dataLength, int32_t &
     }
 
     int32_t index = 0;
-    /*if (mCurrentDataSize > 0) {
-        if (mCurrentDataSize < TS_PACKET_SIZE) {
-            int32_t len = TS_PACKET_SIZE - mCurrentDataSize > dataLength ? dataLength : TS_PACKET_SIZE - mCurrentDataSize;
-            if (len > 0) {
-                memcpy(mBuffer + mCurrentDataSize, data, len);
-                mCurrentDataSize += len;
-                index = len;
-                dataOffset = len;
-            }
-        }
-    }
-
-    if (mCurrentDataSize == TS_PACKET_SIZE) {
-        //int32_t pid = ((mBuffer[1] & 0x1F) << 8) | mBuffer[2];
-        if (mBuffer[0] != 0x47) {
-            printf("data error \n");
-        }
-        parsePacket(mBuffer, TS_PACKET_SIZE);
-        mCurrentDataSize = 0;
-
-        fwrite(mBuffer, 1, TS_PACKET_SIZE, mDumpFile);
-    }*/
-
     int32_t packetCount = 0;
     while (index + TS_PACKET_SIZE <= dataLength) {
         uint8_t *dataIndex = data + index;
@@ -103,7 +44,6 @@ int32_t MediaDataParser::filterData(uint8_t *data, int32_t dataLength, int32_t &
         parsePacket(dataIndex, TS_PACKET_SIZE);
 
         packetCount++;
-        //int32_t pid = ((dataIndex[1] & 0x1F) << 8) | dataIndex[2];
         if (dataIndex[0] != 0x47) {
             printf("data error 2  \n");
         }
@@ -183,9 +123,6 @@ int MediaDataParser::parsePacket(const uint8_t * data, int32_t dataLength) {
     }
 
     int pid = ((data[1] & 0x1F) << 8) | data[2];
-
-
-
     if (pid == 0){
         mPmtPid = parsePat(&mPat, data + 5);
     } else if (pid == 0x11) {
@@ -196,73 +133,10 @@ int MediaDataParser::parsePacket(const uint8_t * data, int32_t dataLength) {
         resetSdt(&sdt, sdtData + 5 + sdtData[4]);
     } else if (mPmtPid == pid){
         parserPmt(&mPmt, data + 5 + data[4]);
-        /*if (mPmt.pmtStream.size() > 1 && mPmt.pmtStream[0].esInfoLenght > 0) {
-            int32_t pmtLength = mPmt.pmtStream[0].vDataLength + 1 + 4 + data[4];
-            uint8_t buffer[188] = { 0 };
-            uint8_t *index = buffer;
-            memcpy(buffer, data, pmtLength);
-            printf("[parsePacket] mBuffer[5]=%d", buffer[5]);
 
-            // audio descriptor
-            uint8_t audioDescriptor[15] = { 0x87, 0xE1, 0x01, 0xF0, 0x0A, 0xCC, 0x08, 0xC0, 0xC4, 0x90, 0x75, 0x6E, 0x64, 0x01, 0x10 };
-            //uint8_t audioDescriptor[5] = { 0x87, 0xE1, 0x01, 0xF0, 0x00 };
-            memcpy(buffer + pmtLength, audioDescriptor, sizeof(audioDescriptor));
-
-            int32_t audioDataLength = sizeof(audioDescriptor);
-            int32_t dataLength = 0;
-
-            dataLength += 2; // program_number
-            dataLength += 1; // version
-            dataLength += 1; //section_number
-            dataLength += 1; //last_section_number
-            dataLength += 2; // pcr_pid;
-            dataLength += 2; // program_info_length
-
-            dataLength += 1; // stream_type
-            dataLength += 2; // element_pid
-            dataLength += 2; // es_info_length
-            dataLength += mPmt.pmtStream[0].esInfoLenght;
-
-            dataLength += audioDataLength;
-            dataLength += 4; // crc_length
-
-            int32_t dataIndex = 3; // from 0
-            dataIndex += 1; // adaption
-            dataIndex += data[dataIndex]; //adaption_length;
-            printf("[parsePacket] adaption length:%d", data[dataIndex]);
-
-            dataIndex += 1; // table_id
-            int32_t tableDataIndex = dataIndex;
-
-            if (dataLength > 0x3FD) {
-                printf("PMT info, section_length(%d) is too long", dataLength);
-            }
-
-            dataIndex += 1;
-            uint32_t section_length = 0xB000 | dataLength;
-            buffer[dataIndex] = section_length >> 8;
-            dataIndex += 1;
-            buffer[dataIndex] = section_length;
-
-            if (gCrcTable[0] == 0xFF){
-                makeCrcTable(gCrcTable);
-            }
-
-            int32_t allDataLen =  dataLength - 4 + 3; // from table_id to crc (exclude crc length)
-            uint32_t crc = crc32Calculate(buffer + 5, allDataLen);
-            //uint32_t crc = crc32Calculate(mBuffer + dataIndex, 12 + mPmt.pmtStream[0].esInfoLenght + 5 + sizeof(audioDescriptor));
-
-            printf("[parsePacket] section_lenth:%0x/%d, pmtLength:%d, video data length:%d, audio data length:%d, allDataLength:%d", dataLength, dataLength, pmtLength, mPmt.pmtStream[0].esInfoLenght, sizeof(audioDescriptor), allDataLen);
-            int crcIndex = pmtLength + sizeof(audioDescriptor);
-            buffer[crcIndex] = (uint8_t)((crc >> 24) & 0xFF);
-            buffer[crcIndex + 1] = (uint8_t)((crc >> 16) & 0xFF);
-            buffer[crcIndex + 2] = (uint8_t)((crc >> 8) & 0xFF);
-            buffer[crcIndex + 3] = (uint8_t)(crc & 0xFF);
-
-            printf("");
-        }
-        */
-
+        uint8_t buffer[188] = {0 };
+        memcpy(buffer, data, 188);
+        resetDTSDescriptor(&mPmt, buffer + 5 + buffer[4]);
     }else if (pid == mVideoPID) {
         int32_t extraDataLength = dataLength;
         const uint8_t *extraData = getExtraData(data, extraDataLength);
@@ -515,6 +389,58 @@ int MediaDataParser::resetSdt(TsSdtTable *stdTable, uint8_t *buffer) {
 	return 0;
 }
 
+int MediaDataParser::resetDTSDescriptor(TsPmtTable *pmtTable, uint8_t *buffer) { // data begin with table_id
+    if(pmtTable == NULL || buffer == NULL) {
+        return -1;
+    }
+
+    int pos = 12;  
+    // program info descriptor  
+    if ( pmtTable->programInfoLength != 0 ){
+        pos += pmtTable->programInfoLength;
+    }
+
+    int32_t sectionLength = 9;
+    for (uint32_t i = 0; i < pmtTable->pmtStream.size(); i++) {
+        TsPmtStream stream = pmtTable->pmtStream[i];
+        if (stream.streamType != 0x06) {
+            pos += stream.esInfoLenght + 5;
+            sectionLength += stream.esInfoLenght + 5;
+        } else {
+            DTSParameters dtsParam;
+            DTSAudioDescriptor dtsDes(dtsParam);
+            int32_t descriptorLength;
+            uint8_t *data = dtsDes.generateData(descriptorLength);
+            if (descriptorLength > 0 && data != NULL) {
+                int32_t index = pos + 5;
+                memcpy(buffer + index, data, descriptorLength);
+                
+                index += descriptorLength;
+                // ÐÞ¸ÄesInfoLength
+                int32_t temp = 0xF << 4  | (descriptorLength >> 8) & 0xF;
+                buffer[pos + 3] = temp;
+                temp = descriptorLength & 0xFF;
+                buffer[pos + 4] = temp;
+
+                sectionLength += descriptorLength + 5 + 4;
+                buffer[1] = 0xB << 4 | ((sectionLength >> 8) & 0xF) ;
+                buffer[2] = sectionLength & 0xFF;
+
+                uint32_t crc = crc32Calculate(buffer, sectionLength - 4 + 3);  //  sectionLength - crc length + tableid + section length
+                buffer[index ] = (uint8_t)((crc >> 24) & 0xFF);
+                buffer[index + 1] = (uint8_t)((crc >> 16) & 0xFF);
+                buffer[index + 2] = (uint8_t)((crc >> 8) & 0xFF);
+                buffer[index + 3] = (uint8_t)(crc & 0xFF);
+
+                //crc = crc32Calculate(buffer, sectionLength + 3);
+                //printf("");
+            }
+        }
+    }
+
+    return 0;
+}
+
 int MediaDataParser::parseVideo(const uint8_t * buffer, int32_t bufferLength) {
     if (buffer == NULL || bufferLength < 4) {
         return -1;
@@ -559,8 +485,8 @@ int MediaDataParser::parseVideo(const uint8_t * buffer, int32_t bufferLength) {
 
 void MediaDataParser::parseVideo() {
     uint8_t buffer[512] = { 0 };
-    mIsHevc = true;
-    char *file = mIsHevc ? "dolby_vision_1500.ts" : "88289853e08e9627c716cdc2e4d65d32.ts";
+    mIsHevc = false;
+    char *file = mIsHevc ? "dolby_vision_1500.ts" : "2.ts";
     FILE *f = fopen(file, "rb");
     if (f == NULL) {
         return;
@@ -622,40 +548,6 @@ void MediaDataParser::testCrc() {
 }
 
 const uint8_t *MediaDataParser::getExtraData(const uint8_t *data, int &length) {
-   /* if (data == NULL || length < 4) {
-        return NULL;
-    }
-
-    if (data[0] != 0x47) {
-        return NULL;
-    }
-
-    int32_t pid = (data[1] << 8 | data[2]) & 0x1FFF;
-    if (pid != 256){
-        return NULL;
-    }
-
-    int32_t dataBegin = 4;
-
-    bool payloadStart = ((data[1] << 8 | data[2]) & 0x4000) != 0;
-    if (!payloadStart) {
-        return NULL;
-    }
-
-
-    bool hasAdaptation = (data[3] & 0x20) != 0;
-    if (hasAdaptation) {
-        int32_t adaptationLength = data[4];
-        dataBegin = dataBegin + 1 + adaptationLength;
-    }
-
-    dataBegin += 3; // 001
-    dataBegin += 5; // PES size
-
-    int32_t pesPayLoadSize =  data[dataBegin];
-    dataBegin += pesPayLoadSize + 1; // 0001
-    */
-
     int32_t dataBegin = findStartCode(data, length);
     if (dataBegin < 0) {
         return NULL;

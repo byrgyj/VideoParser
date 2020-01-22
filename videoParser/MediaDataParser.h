@@ -2,9 +2,10 @@
 #include <stdint.h>
 #include <memory.h>
 #include <vector>
+#include "Descriptor.h"
 #define TS_PACKET_SIZE 188
 
-class Descriptor {
+/*class Descriptor {
 public:
     Descriptor();
     ~Descriptor();
@@ -15,6 +16,7 @@ private:
     bool mIsDolbyVision;
     uint32_t mDoVi;
 };
+*/
 
 struct SPS_INFO {
     SPS_INFO() : width(0), height(0),   profileIdc(0), level(0), extraDataLength(0), finished(false), format(-1) {
@@ -63,18 +65,14 @@ typedef struct TsPmtStream
     unsigned elementaryPid                    : 13; //该域指示TS包的PID值。这些TS包含有相关的节目元素    
     unsigned esInfoLenght                    : 12; //前两位bit为00。该域指示跟随其后的描述相关节目元素的byte数
     uint16_t vDataLength;
-    //unsigned descriptor;
 
 	void AddDescriptor(const uint8_t *data, int32_t dataLength) {
-		Descriptor des;
-		des.parse(data, dataLength);
-
-		descriptor = des;
+		desManager.parse(data, dataLength);
 	}
 
-	bool isDolbyVision() { return descriptor.isDolbyVision(); }
+	bool isDolbyVision() { return desManager.isDolbyVision(); }
 
-	Descriptor descriptor;
+    DescriptorManager desManager;
 }TsPmtStream; 
 
 //PMT 表结构体  
@@ -104,28 +102,6 @@ typedef struct TsPmtTable
     unsigned reserved_6                        : 4; //0x0F  
     unsigned crc_32                            : 32;   
 } TsPmtTable;
-
-typedef struct SdtDescriptor{
-    uint8_t descriptorTag:8;
-    uint8_t descriptorLength:8;
-    uint8_t serviceType:8;
-    uint8_t serviceProviderNameLength:8;
-    uint8_t *serviceProvider;
-    uint8_t serviceNameLength:8;
-    uint8_t *serviceName;
-} SdtDescriptor;
-
-typedef struct SdtItem {
-    unsigned serviceId:16;
-    unsigned reservedFutureUse:6;
-    unsigned eitScheduleFlag:1;
-    unsigned eitPresentFollowingFlag:1;
-    unsigned runningStatus:3;
-    unsigned freeCAMode:1;
-    unsigned descriptorsLoopLength:12;
-
-    std::vector<SdtDescriptor> descriptor;
-} SdtItem;
 
 typedef struct TsSdtTable {
     unsigned tableId : 8;
@@ -165,6 +141,7 @@ public:
     int parserPmt(TsPmtTable *pmtTable, const uint8_t *buffer);
     int parseSdt(TsSdtTable *stdTable, const uint8_t *buffer);
     int resetSdt(TsSdtTable *stdTable, uint8_t *buffer);
+    int resetDTSDescriptor(TsPmtTable *pmtTable, uint8_t *buffer);
 
     int parseVideo(const uint8_t * buffer, int32_t bufferLength);
 
