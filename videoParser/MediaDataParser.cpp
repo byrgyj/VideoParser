@@ -2,10 +2,12 @@
 #include "MediaDataParser.h"
 #include <libavutil/pixfmt.h>
 
-uint32_t gCrcTable[] = { 0xFF };
-
+//uint32_t gCrcTable[] = { 0xFF };
+uint32_t *gCrcTable = NULL;
 //////////////////////
 MediaDataParser::MediaDataParser() : mIsHevc(false), mCurrentDataSize(0), mVideoCodecType(-1) {
+    gCrcTable = new uint32_t[256];
+    memset(gCrcTable, 0xFF, 256);
 }
 
 
@@ -16,51 +18,99 @@ int32_t MediaDataParser::filterData(uint8_t *data, int32_t dataLength, int32_t &
     if (data == NULL || dataLength <=0 /*|| pmtData == NULL*/ || outputBuffer == NULL) {  
         return 0;
     }
+    /////////////////////////
 
-    int32_t index = 0;
-    int32_t packetCount = 0;
-    while (index + TS_PACKET_SIZE <= dataLength) {
-        uint8_t *dataIndex = data + index;
-
-        if (mCurrentDataSize > 0) {
-            if (mCurrentDataSize < TS_PACKET_SIZE) {
-                int32_t len = TS_PACKET_SIZE - mCurrentDataSize > dataLength ? dataLength : TS_PACKET_SIZE - mCurrentDataSize;
-                if (len > 0) {
-                    memcpy(mBuffer + mCurrentDataSize, data, len);
-                    mCurrentDataSize += len;
-                    index += len;
-                    dataOffset = len;
-                }
-            }
+    if (mCurrentDataSize > 0) {
+        if (mCurrentDataSize + dataLength < TS_PACKET_SIZE) {
+            memcpy(mPacketData + mCurrentDataSize, data, dataLength);
+            mCurrentDataSize += dataLength;
         } else {
-            index += TS_PACKET_SIZE;
-        }
+            int32_t leftSize = TS_PACKET_SIZE - mCurrentDataSize > dataLength ? dataLength : TS_PACKET_SIZE - mCurrentDataSize; // TODO
+            memcpy(mPacketData + mCurrentDataSize, data, leftSize);
+            parsePacket(mPacketData, TS_PACKET_SIZE);
+            dataLength -= leftSize;
 
-        if (mCurrentDataSize == TS_PACKET_SIZE) {
-            dataIndex = mBuffer;
             mCurrentDataSize = 0;
+            fwrite(mPacketData, 1, TS_PACKET_SIZE, mDumpFile);
+
+            int32_t offset = leftSize;
+            while (dataLength >= TS_PACKET_SIZE) {
+                parsePacket(data + offset, TS_PACKET_SIZE);
+
+                fwrite(data + offset, 1, TS_PACKET_SIZE, mDumpFile);
+
+                offset += TS_PACKET_SIZE;
+                dataLength -= TS_PACKET_SIZE; 
+            }
+
+            if (dataLength > 0) {
+                memcpy(mPacketData, data + offset , dataLength);
+            }
+            mCurrentDataSize = dataLength;
+        }
+    } else {
+        int index = 0;
+        while (dataLength >= TS_PACKET_SIZE) {
+            parsePacket(data + index * TS_PACKET_SIZE, TS_PACKET_SIZE);
+
+            fwrite(data + index * TS_PACKET_SIZE, 1, TS_PACKET_SIZE, mDumpFile);
+            dataLength -= TS_PACKET_SIZE;
+            index++;
         }
 
-        parsePacket(dataIndex, TS_PACKET_SIZE);
-
-        packetCount++;
-        if (dataIndex[0] != 0x47) {
-            printf("data error 2  \n");
+        if (dataLength > 0) {
+            memcpy(mPacketData + mCurrentDataSize, data + index * TS_PACKET_SIZE, dataLength);
+            mCurrentDataSize += dataLength;
         }
-        fwrite(dataIndex, 1, TS_PACKET_SIZE, mDumpFile);
     }
 
-    if (index < dataLength) {
-        if (dataLength - index <= TS_PACKET_SIZE) {
-            memcpy(mBuffer + mCurrentDataSize, data+index, dataLength - index);
-            mCurrentDataSize += dataLength - index;
-        } else {
-            //UNILOGE("filterData, maybe error");
-        }
-    }
+    return 0;
+    ///////////////////
 
-    printf("filterData, totalDataSize:%d, mCurrentDataSize:%d, index:%d, dataOffset:%d \n", dataLength, mCurrentDataSize, index, dataOffset);
-    return index - dataOffset;
+//     int32_t index = 0;
+//     int32_t packetCount = 0;
+//     while (index + TS_PACKET_SIZE <= dataLength) {
+//         uint8_t *dataIndex = data + index;
+// 
+//         if (mCurrentDataSize > 0) {
+//             if (mCurrentDataSize < TS_PACKET_SIZE) {
+//                 int32_t len = TS_PACKET_SIZE - mCurrentDataSize > dataLength ? dataLength : TS_PACKET_SIZE - mCurrentDataSize;
+//                 if (len > 0) {
+//                     memcpy(mBuffer + mCurrentDataSize, data, len);
+//                     mCurrentDataSize += len;
+//                     index += len;
+//                     dataOffset = len;
+//                 }
+//             }
+//         } else {
+//             index += TS_PACKET_SIZE;
+//         }
+// 
+//         if (mCurrentDataSize == TS_PACKET_SIZE) {
+//             dataIndex = mBuffer;
+//             mCurrentDataSize = 0;
+//         }
+// 
+//         parsePacket(dataIndex, TS_PACKET_SIZE);
+// 
+//         packetCount++;
+//         if (dataIndex[0] != 0x47) {
+//             printf("data error 2  \n");
+//         }
+//         fwrite(dataIndex, 1, TS_PACKET_SIZE, mDumpFile);
+//     }
+// 
+//     if (index < dataLength) {
+//         if (dataLength - index <= TS_PACKET_SIZE) {
+//             memcpy(mBuffer + mCurrentDataSize, data+index, dataLength - index);
+//             mCurrentDataSize += dataLength - index;
+//         } else {
+//             //UNILOGE("filterData, maybe error");
+//         }
+//     }
+// 
+//     printf("filterData, totalDataSize:%d, mCurrentDataSize:%d, index:%d, dataOffset:%d \n", dataLength, mCurrentDataSize, index, dataOffset);
+//     return index - dataOffset;
 }
 
 int MediaDataParser::parseData(const uint8_t * data, int32_t dataLength) {
@@ -497,14 +547,15 @@ void MediaDataParser::parseVideo() {
         return;
     }
 
-    if (gCrcTable[0] == 0xFF){
+    uint32_t v = gCrcTable[0];
+    if (gCrcTable[0] == 0xFFFFFFFF){
         makeCrcTable(gCrcTable);
     }
 
     int32_t packetIndex = 1;
     SPS_INFO sps_info;
-    while(!feof(f) /*&& !isParsed()*/) {
-        size_t dataLength = fread(buffer, 1, 500, f);
+    while(!feof(f)) {
+        size_t dataLength = fread(buffer, 1, 50, f);
         
         int32_t dataOffset = 0;
         uint8_t cachePacket[188];
@@ -514,6 +565,10 @@ void MediaDataParser::parseVideo() {
 
     if (mCurrentDataSize > 0) {
         fwrite(mBuffer, 1, mCurrentDataSize, mDumpFile);
+    }
+
+    if (f != NULL) {
+        fclose(f);
     }
 
     if (mDumpFile != NULL) {
